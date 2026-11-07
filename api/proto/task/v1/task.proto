@@ -1,0 +1,18 @@
+syntax = "proto3";
+package task.v1;
+option go_package = "github.com/rinatkh/classroom18/pkg/proto/task/v1;taskv1";
+
+service TaskService {
+  rpc CreateTask(CreateTaskRequest) returns (TaskResponse);
+  rpc GetTask(GetTaskRequest) returns (TaskResponse);
+}
+// user_id разрешён только в доверенном локальном demo, не является authentication.
+message CreateTaskRequest { int64 user_id = 1; string title = 2; }
+message GetTaskRequest { int64 user_id = 1; int64 task_id = 2; }
+message TaskResponse {
+  int64 id = 1;
+  int64 user_id = 2;
+  string title = 3;
+  bool done = 4;
+  string processing_status = 5;
+}

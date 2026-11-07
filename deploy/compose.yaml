@@ -1,0 +1,130 @@
+name: go-classroom18
+x-go-build: &go-build
+  context: ..
+  dockerfile: deploy/docker/Dockerfile
+x-api-env: &api-env
+  DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?copy .env.example to .env}@postgres:5432/task_api?sslmode=disable
+  REDIS_URL: redis://redis:6379/0
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_TOPIC: task.events
+services:
+  postgres:
+    image: postgres:16.15-bookworm
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env}
+      POSTGRES_DB: task_api
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d task_api"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7.4.11-bookworm
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  kafka:
+    image: apache/kafka:3.9.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:19092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    ports: ["127.0.0.1:19092:19092"]
+    volumes: ["kafka-data:/var/lib/kafka/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+  kafka-init:
+    image: apache/kafka:3.9.2
+    depends_on:
+      kafka: {condition: service_healthy}
+    command: ["/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "task.events", "--partitions", "3", "--replication-factor", "1"]
+  migrate:
+    image: classroom18-api:local
+    build:
+      <<: *go-build
+      args: {SERVICE: api}
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?copy .env.example to .env}@postgres:5432/task_api?sslmode=disable
+    depends_on:
+      postgres: {condition: service_healthy}
+    command: ["/app/migrate", "up"]
+  api-service:
+    image: classroom18-api:local
+    build:
+      <<: *go-build
+      args: {SERVICE: api}
+    environment:
+      <<: *api-env
+      JWT_SECRET: ${JWT_SECRET:?copy .env.example to .env}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-168h}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-refresh_token}
+      HTTP_ADDR: :8080
+      GRPC_ADDR: :50051
+    ports: ["127.0.0.1:8080:8080", "127.0.0.1:50051:50051"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      kafka-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "/app/healthcheck", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  task-worker:
+    image: classroom18-worker:local
+    build:
+      <<: *go-build
+      args: {SERVICE: task-worker}
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: task.events
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+  automation-service:
+    image: classroom18-automation:local
+    build:
+      <<: *go-build
+      args: {SERVICE: automation-service}
+    environment:
+      API_GRPC_ADDR: api-service:50051
+      AUTOMATION_HTTP_ADDR: :8090
+    ports: ["127.0.0.1:8090:8090"]
+    depends_on:
+      api-service: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/app/healthcheck", "http://localhost:8090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  postgres-data:
+  kafka-data:

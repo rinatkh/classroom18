@@ -1,0 +1,9 @@
+.git
+.idea
+.env
+bin
+.tools
+**/*_test.go
+docs
+sql
+scripts
