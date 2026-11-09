@@ -85,6 +85,34 @@ ERROR — неожиданная ошибка на границе обработ
 Redis hash, password и access/refresh credentials в логи не записываются.
 `make logs-*` — блокирующие команды наблюдения, запускайте в отдельных терминалах.
 
+### Automation
+
+`make logs-automation` показывает stderr/stdout контейнера automation-service.
+На INFO видны запуск/остановка, результат HTTP и исходящего gRPC вызова:
+request_id, route, http_status/grpc_code, duration_ms и task_id успешного RPC.
+WARN — ошибки входных данных/доступа, ERROR — сбой API, deadline или записи ответа.
+DEBUG добавляет начало запросов и health probes; успешный /health на INFO не пишется.
+Request_id генерируется локально в процессе; это не распределённый trace ID.
+Тела, title, заголовки, query и raw gRPC error message не логируются.
+
+Чтобы увидеть вызов, обращайтесь к порту automation (8090). Прямой запрос на API
+8080 через automation не проходит. Например, в другом терминале:
+
+```bash
+curl -i 'http://localhost:8090/automation/tasks/1?user_id=1'
+```
+
+Ответ зависит от существования/владельца Task, а HTTP и gRPC результаты будут в логах.
+Для подробного JSON logging задайте LOG_LEVEL=DEBUG и LOG_FORMAT=json в .env.
+В уже запущенном стеке пересоберите и пересоздайте только automation:
+
+```bash
+docker compose --env-file .env -f deploy/compose.yaml up -d --build --no-deps automation-service
+make logs-automation
+```
+
+Простой restart не пересобирает image и не применяет новое environment.
+
 ## Состояние данных
 
 make down сохраняет PostgreSQL/Kafka named volumes. Redis настроен без persistence:

@@ -23,7 +23,7 @@ func NewRouter(client taskv1.TaskServiceClient) http.Handler {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
 	mux.HandleFunc("POST /automation/tasks", h.create)
 	mux.HandleFunc("GET /automation/tasks/{id}", h.get)
-	return mux
+	return logRequests(mux)
 }
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var input struct {
