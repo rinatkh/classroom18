@@ -24,6 +24,46 @@ Consumer: Fetch → Decode → type filter → Handle → Commit. Выход wor
 в SQL, повтор не меняет Done/updated_at. Result owner mismatch считается invalid event.
 Удалённая Task игнорируется: async результат больше не нужен.
 
+## Почему две публикации не образуют цикл
+
+| Кто | Вход | Действие | Публикация |
+| --- | --- | --- | --- |
+| TaskUseCase.Create | HTTP/gRPC Create | Сохраняет новую Task | `task.created` |
+| task-worker: Processor.Handle | Только `task.created` | Считает слова в title | `task.processed` |
+| API: ProcessedHandler.Handle | Только `task.processed` | Меняет processing_status в repository | Нет |
+
+Оба типа записываются в один `task.events`, но consumer groups независимы:
+`task-workers` обрабатывает created, `api-task-results` — processed. Consumer читает
+records других типов и продвигает свой offset без вызова handler. Дополнительно
+`Processor.Handle` сам возвращает nil для processed, ничего не публикуя.
+`ProcessedHandler` не вызывает `UseCase.Create` и не получает publisher.
+На результате цепочка заканчивается. В console observer обычно видна пара типов
+для одной Task; при повторной доставке records может быть больше.
+
+## Что здесь идемпотентно
+
+1. API публикует created с event_id, например `abc`.
+2. Worker публикует processed с event_id `abc:processed` и ждёт подтверждения Kafka.
+3. Только затем consumer фиксирует offset входного created в группе task-workers.
+4. Если процесс упал между 2 и 3, после запуска Kafka снова выдаст created `abc`.
+5. Worker снова опубликует `abc:processed`. Это может быть **ещё один Kafka record**,
+   с новым offset и новым occurred_at. Одинаковый event_id сам по себе не удаляет дубли.
+
+API применяет результат через `ProcessedHandler`: проверяет Task/owner и, если статус
+уже processed, успешно заканчивает обработку. `MarkProcessed` также защищает повторный
+UPDATE: `processing_status` остаётся processed, `Done` и `updated_at` не меняются.
+Поэтому повтор результата не повторяет изменение состояния, даже если два handler
+успели прочитать pending одновременно. Это идемпотентность обработки результата,
+а не всего API. В этой demo нет inbox-таблицы или дедупликации по event_id: защита
+основана на переходе pending → processed, рассчитанном на одну обработку Task.
+
+Повторный `POST /tasks` — другой случай: вызывается Create, создаются новая Task и новый
+случайный event_id. Idempotency-Key здесь не реализован. При сбое между SQL и Kafka
+не нужно повторять POST вслепую; см. dual write ниже. Повторный `task.processed`
+не запускает Create.
+
+## Политика ошибок
+
 Ошибки JSON/version и invalid application events в demo пропускаются с безопасным log,
 без raw payload. Production добавит DLQ/retry budget/metrics, иначе poison record или
 бесконечный transient failure может задержать stream. Один последовательный handler

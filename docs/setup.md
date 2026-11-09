@@ -113,6 +113,60 @@ make logs-automation
 
 Простой restart не пересобирает image и не применяет новое environment.
 
+## Сообщения Kafka
+
+`make logs-kafka` показывает логи **брокера**, а содержимое topic смотрим отдельно.
+После `make up` откройте ещё один терминал в корне classroom18:
+
+```bash
+make kafka-messages
+```
+
+Команда читает сохранившуюся историю `task.events` с начала каждой partition, затем ждёт
+новые records. В каждой строке видны timestamp, partition, offset, key=task_id и JSON
+с event_type/event_id. Старые records, удалённые по retention, вернуть этой командой нельзя.
+Порядок гарантирован внутри partition, а не между всеми строками вывода.
+
+```bash
+make kafka-messages-new   # только новые records после назначения partitions наблюдателю
+make kafka-consume        # прежнее имя: alias make kafka-messages
+```
+
+Обе команды блокирующие; Ctrl+C останавливает наблюдение. У console consumer отдельная
+случайная group, auto-commit выключен. Он не забирает работу у `task-workers` и не меняет
+offsets `api-task-results`; чтение record не удаляет его из Kafka. Сначала запустите
+наблюдатель, затем создайте Task через API/automation. Новая group получает partitions
+не мгновенно: для проверки самых первых событий надёжнее команда с историей.
+
+Для короткой выборки можно передать стандартные параметры console consumer:
+
+```bash
+make kafka-messages KAFKA_OBSERVER_ARGS='--max-messages 2'
+```
+
+Это первые два доступных record, а не обязательно пара одной Task. Если records меньше
+двух, команда ждёт оставшиеся до Ctrl+C. Не передавайте наблюдателю group ID приложения.
+
+### macOS
+
+Make-команды используют `kafka-console-consumer.sh` из уже запущенного `apache/kafka:3.9.2`
+через Docker Compose. Достаточно Docker Desktop с Compose, make и Python3, как для
+`make up`. Локальная установка Kafka/Java для наблюдателя не требуется.
+
+Если Kafka CLI уже установлен на Mac и нужен запуск непосредственно с хоста:
+
+```bash
+kafka-console-consumer --bootstrap-server localhost:19092 \
+  --topic task.events --from-beginning \
+  --consumer-property enable.auto.commit=false \
+  --property print.timestamp=true --property print.partition=true \
+  --property print.offset=true --property print.key=true
+```
+
+У некоторых дистрибутивов имя команды — `kafka-console-consumer.sh`. С хоста используем
+`localhost:19092`; `kafka:9092` доступен внутри Compose network. Объяснение двух типов
+событий и повторной доставки — в [events-and-failures.md](events-and-failures.md).
+
 ## Состояние данных
 
 make down сохраняет PostgreSQL/Kafka named volumes. Redis настроен без persistence:

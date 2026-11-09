@@ -24,7 +24,8 @@ func (p *Processor) Handle(ctx context.Context, event task.Event) error {
 	if words == 0 {
 		return task.ErrInvalidEvent
 	}
-	// Повторная доставка входа даёт тот же ID результата. API идемпотентен.
+	// Повтор created даёт тот же event ID результата, но может добавить новый Kafka record.
+	// API идемпотентно применяет processed через MarkProcessed; POST /tasks этим не защищён.
 	result := task.Event{ID: event.ID + ":processed", Type: task.TaskProcessed, Version: 1,
 		OccurredAt: time.Now().UTC(), TaskID: event.TaskID, UserID: event.UserID,
 		Result: "success", WordCount: words}

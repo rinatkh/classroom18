@@ -20,6 +20,7 @@ type TaskServer struct {
 }
 
 func NewTaskServer(useCase TaskUseCase) *TaskServer { return &TaskServer{useCase: useCase} }
+
 func (s *TaskServer) CreateTask(ctx context.Context, r *taskv1.CreateTaskRequest) (*taskv1.TaskResponse, error) {
 	if r == nil || r.UserId <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "positive user_id required")

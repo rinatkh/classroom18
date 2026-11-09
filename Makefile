@@ -2,6 +2,13 @@
 GO ?= go
 DOCKER ?= docker
 COMPOSE = $(DOCKER) compose --env-file .env -f deploy/compose.yaml
+# Console consumer получает собственную случайную группу; offsets приложений не трогаем.
+KAFKA_OBSERVER_ARGS ?=
+KAFKA_OBSERVER = $(COMPOSE) exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
+	--bootstrap-server kafka:9092 --topic task.events \
+	--consumer-property enable.auto.commit=false \
+	--property print.timestamp=true --property print.partition=true \
+	--property print.offset=true --property print.key=true --property print.value=true
 TOOLS := $(CURDIR)/.tools
 PROTOC ?= protoc
 PATH := $(TOOLS):$(PATH)
@@ -65,8 +72,11 @@ redis-cli: env ## Inspect refresh hashes and TTL, use SCAN
 	$(COMPOSE) exec redis redis-cli
 kafka-topics: env ## Describe partitions of task.events
 	$(COMPOSE) exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic task.events
-kafka-consume: env ## Independent console observer, starts at beginning
-	$(COMPOSE) exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic task.events --from-beginning --property print.key=true
+kafka-messages: env ## Show retained Kafka messages, then follow new ones (Ctrl+C to stop)
+	$(KAFKA_OBSERVER) --from-beginning $(KAFKA_OBSERVER_ARGS)
+kafka-messages-new: env ## Follow only new Kafka messages after observer assignment
+	$(KAFKA_OBSERVER) --consumer-property auto.offset.reset=latest $(KAFKA_OBSERVER_ARGS)
+kafka-consume: kafka-messages ## Compatibility alias for kafka-messages
 # Reflection is for trusted local demo only.
 grpc-list: ## List gRPC service with local grpcurl
 	$(TOOLS)/grpcurl -plaintext localhost:50051 list
@@ -106,4 +116,4 @@ curl-demo: ## Previous HTTP CRUD lifecycle
 session-demo: ## Previous access expiration/refresh/logout lifecycle; use 20s Access TTL
 	bash scripts/session-demo.sh
 
-.PHONY: help env build test test-race vet fmt ci tools proto docker-build up down restart ps logs logs-api logs-worker logs-automation logs-kafka migrate-up migrate-down migrate-status psql redis-cli kafka-topics kafka-consume grpc-list demo test-db test-db-race test-redis test-kafka integration qa-compose clean fmt-check compose-config migrate-local-up migrate-local-down migrate-local-status structure structure-local status curl-demo session-demo
+.PHONY: help env build test test-race vet fmt ci tools proto docker-build up down restart ps logs logs-api logs-worker logs-automation logs-kafka migrate-up migrate-down migrate-status psql redis-cli kafka-topics kafka-consume kafka-messages kafka-messages-new grpc-list demo test-db test-db-race test-redis test-kafka integration qa-compose clean fmt-check compose-config migrate-local-up migrate-local-down migrate-local-status structure structure-local status curl-demo session-demo

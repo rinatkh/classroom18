@@ -43,7 +43,11 @@ curl -i http://localhost:8080/health
 `make env` создаёт локальный `.env` с независимыми случайными секретами и правами 600,
 существующий файл сохраняется. Не коммитьте его. Запускать команды нужно из корня classroom18.
 Сначала пройдите [ручную demo](docs/demo.md), затем `make demo`.
-В другом терминале откройте `make logs-worker` и `make kafka-consume`: это блокирующие наблюдатели.
+В отдельных терминалах откройте `make logs-worker` и `make kafka-messages`: это блокирующие
+наблюдатели. Первая команда показывает логи процесса, вторая — сами Kafka records с JSON,
+key, timestamp, partition и offset. `make kafka-messages-new` пропускает историю.
+На macOS consumer запускается внутри Kafka-контейнера: отдельные Kafka CLI/Java на хосте
+для этих Make-команд не нужны. Подробнее — [как смотреть сообщения](docs/setup.md#сообщения-kafka).
 
 ## Команды миграций изменили имена явно
 
